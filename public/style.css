@@ -1,0 +1,13 @@
+html,body{height:100%;margin:0}
+#wrap{height:100%;display:flex;align-items:center;justify-content:center;background:#111}
+canvas{max-width:90vw;max-height:90vh;border-radius:6px;box-shadow:0 6px 30px rgba(0,0,0,.6)}
+#status{position:fixed;left:8px;top:8px;color:#ddd;font-family:Arial,Helvetica}
+
+
+/* UX protections */
+body{user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
+canvas{pointer-events:auto}
+
+
+/* блокируем контекстное меню и drag */
+body,canvas{touch-action:none}
