@@ -9,7 +9,7 @@
 
   setStatus('Initializing session...');
 
-  const sessRes = await fetch('/api/server/session-init').then(r => r.json());
+  const sessRes = await fetch('/session-init').then(r => r.json());
   const chunkSize = sessRes.chunkSize;
   const totalChunks = sessRes.totalChunks;
 
@@ -33,7 +33,7 @@
 
   for (let i = 0; i < totalChunks; i++) {
     setStatus(`Downloading chunk ${i + 1}/${totalChunks}...`);
-    const resp = await fetch('/api/server/get-chunk', {
+    const resp = await fetch('/get-chunk', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ chunkIndex: i })
