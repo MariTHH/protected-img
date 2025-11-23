@@ -6,40 +6,66 @@ const ctx = canvas.getContext('2d');
 
 function setStatus(t) { status.textContent = t }
 
+// HKDF implementation for client
+async function hkdf(client, salt, info, length = 32) {
+  const key = await crypto.subtle.importKey(
+    'raw',
+    client,
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+  
+  const prk = await crypto.subtle.sign('HMAC', key, salt);
+  
+  let output = new Uint8Array();
+  let prev = new Uint8Array();
+  let i = 0;
+  
+  while (output.length < length) {
+    i += 1;
+    const input = new Uint8Array([
+      ...prev,
+      ...info,
+      i
+    ]);
+    
+    const key2 = await crypto.subtle.importKey(
+      'raw',
+      prk,
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['sign']
+    );
+    
+    const chunk = await crypto.subtle.sign('HMAC', key2, input);
+    prev = new Uint8Array(chunk);
+    output = new Uint8Array([...output, ...prev]);
+  }
+  
+  return output.slice(0, length);
+}
+
 async function main() {
   try {
     setStatus('Initializing session...');
 
     const sessRes = await fetch('/session-init').then(r => r.json());
-    const chunkSize = sessRes.chunkSize;
     const totalChunks = sessRes.totalChunks;
+    
+    // FIXED: Get the shared secret from server
+    const sharedSecret = Uint8Array.from(atob(sessRes.sharedSecret), c => c.charCodeAt(0));
 
-    // ===== FIXED: SIMPLIFIED KEY DERIVATION =====
+    // FIXED: Derive AES key using the same method as server
     const salt = new Uint8Array(16);
     const info = new TextEncoder().encode('protected-image');
     
-    // FIX: Use a static shared secret that matches server
-    // This should be 32 bytes of zeros or any consistent value
-    const sharedSecret = new Uint8Array(32); // 32 bytes of zeros
+    const derivedKey = await hkdf(sharedSecret, salt, info, 32);
     
-    // FIX: Proper HKDF derivation
-    const baseKey = await crypto.subtle.importKey(
+    const aesKey = await crypto.subtle.importKey(
       'raw',
-      sharedSecret,
-      { name: 'HKDF' },
-      false,
-      ['deriveKey']
-    );
-    
-    const aesKey = await crypto.subtle.deriveKey(
-      {
-        name: 'HKDF',
-        salt: salt,
-        info: info,
-        hash: 'SHA-256'
-      },
-      baseKey,
-      { name: 'AES-GCM', length: 256 },
+      derivedKey,
+      { name: 'AES-GCM' },
       false,
       ['decrypt']
     );
@@ -59,32 +85,20 @@ async function main() {
       const iv = Uint8Array.from(atob(resp.iv), c => c.charCodeAt(0));
       const tag = Uint8Array.from(atob(resp.tag), c => c.charCodeAt(0));
 
-      // FIX: Combine ciphertext and tag properly
-      const combined = new Uint8Array(ct.length + 16); // 16 bytes for tag
-      combined.set(ct, 0);
-      combined.set(tag, ct.length);
+      // Combine ciphertext + tag
+      const encryptedData = new Uint8Array(ct.length + tag.length);
+      encryptedData.set(ct, 0);
+      encryptedData.set(tag, ct.length);
 
       try {
-        // FIX: Correct AES-GCM parameters - no additionalData
         const plain = await crypto.subtle.decrypt(
-          { 
-            name: 'AES-GCM', 
-            iv: iv
-            // Remove additionalData and tagLength - not needed
-          },
+          { name: 'AES-GCM', iv: iv },
           aesKey,
-          combined
+          encryptedData
         );
         chunks.push(new Uint8Array(plain));
       } catch (decryptError) {
         console.error(`Decryption failed for chunk ${i}:`, decryptError);
-        
-        // Debug: Log what we received
-        console.log('Chunk:', i, 'IV length:', iv.length, 'CT length:', ct.length, 'Tag length:', tag.length);
-        console.log('First few bytes of CT:', ct.slice(0, 4));
-        console.log('First few bytes of IV:', iv.slice(0, 4));
-        console.log('First few bytes of Tag:', tag.slice(0, 4));
-        
         throw decryptError;
       }
     }
@@ -105,8 +119,7 @@ async function main() {
       ctx.drawImage(img, 0, 0);
       URL.revokeObjectURL(url);
       setStatus('Loaded');
-
-      // Add protection
+      
       const blocker = document.createElement('div');
       blocker.style.cssText = `
         position: fixed;
@@ -117,11 +130,6 @@ async function main() {
         pointer-events: none;
       `;
       document.body.appendChild(blocker);
-      
-      document.addEventListener('copy', e => {
-        e.preventDefault();
-        e.clipboardData.setData('text/plain', 'Content protected');
-      });
     };
     
     img.onerror = () => {
@@ -136,5 +144,4 @@ async function main() {
   }
 }
 
-// Start the application
 main();

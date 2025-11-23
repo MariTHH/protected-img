@@ -5,7 +5,6 @@ const path = require('path');
 
 const app = express();
 
-// === CORS FIX ===
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -18,7 +17,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 const PORT = process.env.PORT || 8080;
 const IMAGE_PATH = path.join(__dirname, 'image.png');
-const CHUNK_SIZE = 32 * 1024; // 32 KB per chunk
+const CHUNK_SIZE = 32 * 1024;
 
 if (!fs.existsSync(IMAGE_PATH)) {
   console.error('Put an image named image.png in project root');
@@ -28,7 +27,9 @@ if (!fs.existsSync(IMAGE_PATH)) {
 const IMAGE_BUFFER = fs.readFileSync(IMAGE_PATH);
 const TOTAL_CHUNKS = Math.ceil(IMAGE_BUFFER.length / CHUNK_SIZE);
 
-// === HKDF helper ===
+// FIXED: Use a STATIC shared secret that client can replicate
+const SHARED_SECRET = new Uint8Array(32); // 32 bytes of zeros - CLIENT CAN USE THIS
+
 function hkdf(keyMaterial, salt, info, length = 32) {
   const prk = crypto.createHmac('sha256', salt).update(keyMaterial).digest();
   let prev = Buffer.alloc(0);
@@ -46,17 +47,11 @@ function hkdf(keyMaterial, salt, info, length = 32) {
   return Buffer.concat(output).slice(0, length);
 }
 
-// === ONE-TIME SERVER KEY & CHUNKS ===
-const serverECDH = crypto.createECDH('prime256v1');
-serverECDH.generateKeys();
-const serverPublicB64 = serverECDH.getPublicKey().toString('base64');
-
-// Для всех клиентов одинаковый static "shared secret"
-const sharedSecret = crypto.randomBytes(32);
+// Pre-calculate AES key once
 const salt = Buffer.alloc(16, 0);
-const aesKey = hkdf(sharedSecret, salt, Buffer.from('protected-image'), 32);
+const aesKey = hkdf(SHARED_SECRET, salt, Buffer.from('protected-image'), 32);
 
-// Предрассчитываем все чанки один раз
+// Pre-calculate all chunks
 const chunks = [];
 for (let i = 0; i < TOTAL_CHUNKS; i++) {
   const start = i * CHUNK_SIZE;
@@ -76,12 +71,13 @@ for (let i = 0; i < TOTAL_CHUNKS; i++) {
   });
 }
 
-// === ROUTES ===
+// ROUTES
 app.get('/session-init', (req, res) => {
   res.json({
-    serverPublic: serverPublicB64,
     chunkSize: CHUNK_SIZE,
-    totalChunks: TOTAL_CHUNKS
+    totalChunks: TOTAL_CHUNKS,
+    // Send the static shared secret to client (in real app, use proper key exchange)
+    sharedSecret: Buffer.from(SHARED_SECRET).toString('base64')
   });
 });
 
@@ -95,5 +91,4 @@ app.post('/get-chunk', (req, res) => {
   }
 });
 
-// === START SERVER ===
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
