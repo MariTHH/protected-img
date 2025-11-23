@@ -27,29 +27,8 @@ if (!fs.existsSync(IMAGE_PATH)) {
 const IMAGE_BUFFER = fs.readFileSync(IMAGE_PATH);
 const TOTAL_CHUNKS = Math.ceil(IMAGE_BUFFER.length / CHUNK_SIZE);
 
-// FIXED: Use a STATIC shared secret that client can replicate
-const SHARED_SECRET = new Uint8Array(32); // 32 bytes of zeros - CLIENT CAN USE THIS
-
-function hkdf(keyMaterial, salt, info, length = 32) {
-  const prk = crypto.createHmac('sha256', salt).update(keyMaterial).digest();
-  let prev = Buffer.alloc(0);
-  const output = [];
-  let i = 0;
-  while (Buffer.concat(output).length < length) {
-    i += 1;
-    const hmac = crypto.createHmac('sha256', prk);
-    hmac.update(prev);
-    hmac.update(info);
-    hmac.update(Buffer.from([i]));
-    prev = hmac.digest();
-    output.push(prev);
-  }
-  return Buffer.concat(output).slice(0, length);
-}
-
-// Pre-calculate AES key once
-const salt = Buffer.alloc(16, 0);
-const aesKey = hkdf(SHARED_SECRET, salt, Buffer.from('protected-image'), 32);
+// SIMPLIFIED: Use a static AES key (32 bytes)
+const STATIC_AES_KEY = Buffer.alloc(32, 0); // 32 zeros
 
 // Pre-calculate all chunks
 const chunks = [];
@@ -59,7 +38,7 @@ for (let i = 0; i < TOTAL_CHUNKS; i++) {
   const slice = IMAGE_BUFFER.slice(start, end);
 
   const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv('aes-256-gcm', aesKey, iv);
+  const cipher = crypto.createCipheriv('aes-256-gcm', STATIC_AES_KEY, iv);
   const ciphertext = Buffer.concat([cipher.update(slice), cipher.final()]);
   const tag = cipher.getAuthTag();
 
@@ -75,9 +54,7 @@ for (let i = 0; i < TOTAL_CHUNKS; i++) {
 app.get('/session-init', (req, res) => {
   res.json({
     chunkSize: CHUNK_SIZE,
-    totalChunks: TOTAL_CHUNKS,
-    // Send the static shared secret to client (in real app, use proper key exchange)
-    sharedSecret: Buffer.from(SHARED_SECRET).toString('base64')
+    totalChunks: TOTAL_CHUNKS
   });
 });
 

@@ -6,65 +6,19 @@ const ctx = canvas.getContext('2d');
 
 function setStatus(t) { status.textContent = t }
 
-// HKDF implementation for client
-async function hkdf(client, salt, info, length = 32) {
-  const key = await crypto.subtle.importKey(
-    'raw',
-    client,
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign']
-  );
-  
-  const prk = await crypto.subtle.sign('HMAC', key, salt);
-  
-  let output = new Uint8Array();
-  let prev = new Uint8Array();
-  let i = 0;
-  
-  while (output.length < length) {
-    i += 1;
-    const input = new Uint8Array([
-      ...prev,
-      ...info,
-      i
-    ]);
-    
-    const key2 = await crypto.subtle.importKey(
-      'raw',
-      prk,
-      { name: 'HMAC', hash: 'SHA-256' },
-      false,
-      ['sign']
-    );
-    
-    const chunk = await crypto.subtle.sign('HMAC', key2, input);
-    prev = new Uint8Array(chunk);
-    output = new Uint8Array([...output, ...prev]);
-  }
-  
-  return output.slice(0, length);
-}
-
 async function main() {
   try {
     setStatus('Initializing session...');
 
     const sessRes = await fetch('/session-init').then(r => r.json());
     const totalChunks = sessRes.totalChunks;
-    
-    // FIXED: Get the shared secret from server
-    const sharedSecret = Uint8Array.from(atob(sessRes.sharedSecret), c => c.charCodeAt(0));
 
-    // FIXED: Derive AES key using the same method as server
-    const salt = new Uint8Array(16);
-    const info = new TextEncoder().encode('protected-image');
-    
-    const derivedKey = await hkdf(sharedSecret, salt, info, 32);
+    // SIMPLIFIED: Use the same static AES key as server
+    const STATIC_AES_KEY = new Uint8Array(32); // 32 zeros
     
     const aesKey = await crypto.subtle.importKey(
       'raw',
-      derivedKey,
+      STATIC_AES_KEY,
       { name: 'AES-GCM' },
       false,
       ['decrypt']
@@ -85,20 +39,32 @@ async function main() {
       const iv = Uint8Array.from(atob(resp.iv), c => c.charCodeAt(0));
       const tag = Uint8Array.from(atob(resp.tag), c => c.charCodeAt(0));
 
-      // Combine ciphertext + tag
-      const encryptedData = new Uint8Array(ct.length + tag.length);
+      console.log(`Chunk ${i}: IV=${iv.length}, CT=${ct.length}, Tag=${tag.length}`);
+
+      // Combine ciphertext + tag (tag is 16 bytes for AES-GCM)
+      const encryptedData = new Uint8Array(ct.length + 16);
       encryptedData.set(ct, 0);
       encryptedData.set(tag, ct.length);
 
       try {
         const plain = await crypto.subtle.decrypt(
-          { name: 'AES-GCM', iv: iv },
+          { 
+            name: 'AES-GCM', 
+            iv: iv
+          },
           aesKey,
           encryptedData
         );
         chunks.push(new Uint8Array(plain));
+        console.log(`Chunk ${i} decrypted successfully: ${plain.byteLength} bytes`);
       } catch (decryptError) {
         console.error(`Decryption failed for chunk ${i}:`, decryptError);
+        
+        // Debug info
+        console.log('IV (hex):', Array.from(iv).map(b => b.toString(16).padStart(2, '0')).join(''));
+        console.log('Tag (hex):', Array.from(tag).map(b => b.toString(16).padStart(2, '0')).join(''));
+        console.log('First 16 bytes CT (hex):', Array.from(ct.slice(0, 16)).map(b => b.toString(16).padStart(2, '0')).join(''));
+        
         throw decryptError;
       }
     }
@@ -107,8 +73,14 @@ async function main() {
     const totalBytes = chunks.reduce((s, c) => s + c.length, 0);
     const out = new Uint8Array(totalBytes);
     let ptr = 0;
-    for (const c of chunks) { out.set(c, ptr); ptr += c.length; }
+    for (const c of chunks) { 
+      out.set(c, ptr); 
+      ptr += c.length; 
+    }
 
+    // Verify we have valid PNG data
+    console.log('First 8 bytes of decrypted data:', Array.from(out.slice(0, 8)).map(b => b.toString(16).padStart(2, '0')).join(' '));
+    
     const blob = new Blob([out], { type: 'image/png' });
     const url = URL.createObjectURL(blob);
 
@@ -132,8 +104,9 @@ async function main() {
       document.body.appendChild(blocker);
     };
     
-    img.onerror = () => {
-      setStatus('Error loading image');
+    img.onerror = (e) => {
+      console.error('Image loading error:', e);
+      setStatus('Error: Invalid image data');
     };
     
     img.src = url;
