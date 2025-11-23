@@ -5,6 +5,14 @@ const path = require('path');
 
 const app = express();
 
+// === CORS FIX ===
+app.use((req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST');
+  next();
+});
+
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -37,7 +45,7 @@ function hkdf(keyMaterial, salt, info, length = 32) {
   return Buffer.concat(output).slice(0, length);
 }
 
-// === Session key storage (for stateless Vercel) ===
+// === sessions ===
 const sessions = new Map();
 function createServerKeypair() {
   const ecdh = crypto.createECDH('prime256v1');
