@@ -9,7 +9,10 @@
 
   setStatus('Initializing session...');
 
-  const sessRes = await fetch('https://protected-img.vercel.app/session-init').then(r => r.json());
+  // === NEW VERCEL URL ===
+  const sessRes = await fetch('/api/server?route=session-init')
+    .then(r => r.json());
+
   const serverPubB64 = sessRes.serverPublic;
   const chunkSize = sessRes.chunkSize;
   const totalChunks = sessRes.totalChunks;
@@ -22,6 +25,7 @@
     true,
     ['deriveBits']
   );
+
   const clientPubRaw = await window.crypto.subtle.exportKey('raw', clientKey.publicKey);
   const clientPubB64 = btoa(String.fromCharCode(...new Uint8Array(clientPubRaw)));
 
@@ -57,7 +61,8 @@
   for (let i = 0; i < totalChunks; i++) {
     setStatus(`Downloading chunk ${i + 1}/${totalChunks}...`);
 
-    const resp = await fetch('https://protected-img.vercel.app/get-chunk', {
+    // === NEW VERCEL URL ===
+    const resp = await fetch('/api/server?route=get-chunk', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ clientPublic: clientPubB64, chunkIndex: i, sessionId })
@@ -68,14 +73,17 @@
     const ct = Uint8Array.from(atob(resp.ciphertext), c => c.charCodeAt(0));
     const iv = Uint8Array.from(atob(resp.iv), c => c.charCodeAt(0));
     const tag = Uint8Array.from(atob(resp.tag), c => c.charCodeAt(0));
+
     const full = new Uint8Array(ct.length + tag.length);
-    full.set(ct, 0); full.set(tag, ct.length);
+    full.set(ct, 0);
+    full.set(tag, ct.length);
 
     const plain = await window.crypto.subtle.decrypt(
       { name: 'AES-GCM', iv, tagLength: 128 },
       aesKey,
       full.buffer
     );
+
     chunks.push(new Uint8Array(plain));
   }
 
@@ -83,7 +91,10 @@
   const totalBytes = chunks.reduce((s, c) => s + c.length, 0);
   const out = new Uint8Array(totalBytes);
   let ptr = 0;
-  for (const c of chunks) { out.set(c, ptr); ptr += c.length; }
+  for (const c of chunks) {
+    out.set(c, ptr);
+    ptr += c.length;
+  }
 
   const blob = new Blob([out], { type: 'image/png' });
   const url = URL.createObjectURL(blob);
@@ -104,10 +115,10 @@
     blocker.style.height = '100%';
     blocker.style.zIndex = '9999';
     blocker.style.background = 'transparent';
-    document.body.appendChild(blocker);
 
+    document.body.appendChild(blocker);
     document.addEventListener('copy', e => e.preventDefault());
   };
-  img.src = url;
 
+  img.src = url;
 })();
