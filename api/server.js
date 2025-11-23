@@ -1,29 +1,19 @@
-const express = require('express');
-const crypto = require('crypto');
-const fs = require('fs');
-const path = require('path');
+import { readFileSync } from 'fs';
+import { join } from 'path';
+import crypto from 'crypto';
 
-const app = express();
-
-// CORS (если фронт не на Vercel)
-app.use((req, res, next) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST');
-  next();
-});
-
-app.use(express.json({ limit: '10mb' }));
-
-// ===== CONFIG =====
-const IMAGE_PATH = path.join(__dirname, '..', 'image.png'); // в корне проекта
+const IMAGE_BUFFER = readFileSync(join(process.cwd(), 'image.png'));
 const CHUNK_SIZE = 32 * 1024;
-
-// ===== LOAD IMAGE =====
-const IMAGE_BUFFER = fs.readFileSync(IMAGE_PATH);
 const TOTAL_CHUNKS = Math.ceil(IMAGE_BUFFER.length / CHUNK_SIZE);
 
-// ===== HKDF =====
+const sessions = new Map();
+
+function createServerKeypair() {
+  const ecdh = crypto.createECDH('prime256v1');
+  ecdh.generateKeys();
+  return ecdh;
+}
+
 function hkdf(keyMaterial, salt, info, length = 32) {
   const prk = crypto.createHmac('sha256', salt).update(keyMaterial).digest();
   let prev = Buffer.alloc(0);
@@ -41,43 +31,23 @@ function hkdf(keyMaterial, salt, info, length = 32) {
   return Buffer.concat(output).slice(0, length);
 }
 
-// ===== SESSION STORAGE =====
-const sessions = new Map();
-function createServerKeypair() {
-  const ecdh = crypto.createECDH('prime256v1');
-  ecdh.generateKeys();
-  return ecdh;
-}
+export default async function handler(req, res) {
+  if (req.method === 'GET' && req.query.route === 'session-init') {
+    const sid = crypto.randomBytes(8).toString('hex');
+    const ecdh = createServerKeypair();
+    sessions.set(sid, ecdh);
 
-// ===== ROUTES =====
-app.get((req, res) => {
-  if (req.query.route !== 'session-init') {
-    return res.status(400).json({ error: 'Unknown route' });
+    return res.json({
+      sessionId: sid,
+      serverPublic: ecdh.getPublicKey().toString('base64'),
+      chunkSize: CHUNK_SIZE,
+      totalChunks: TOTAL_CHUNKS
+    });
   }
 
-  const sid = crypto.randomBytes(8).toString('hex');
-  const ecdh = createServerKeypair();
-  sessions.set(sid, ecdh);
-
-  res.json({
-    sessionId: sid,
-    serverPublic: ecdh.getPublicKey().toString('base64'),
-    chunkSize: CHUNK_SIZE,
-    totalChunks: TOTAL_CHUNKS
-  });
-});
-
-app.post((req, res) => {
-  if (req.query.route !== 'get-chunk') {
-    return res.status(400).json({ error: 'Unknown route' });
-  }
-
-  try {
+  if (req.method === 'POST' && req.query.route === 'get-chunk') {
     const { clientPublic, chunkIndex, sessionId } = req.body;
-
-    if (!sessions.has(sessionId)) {
-      return res.status(400).json({ error: 'Invalid session' });
-    }
+    if (!sessions.has(sessionId)) return res.status(400).json({ error: 'Invalid session' });
 
     const serverECDH = sessions.get(sessionId);
     const clientPubBuf = Buffer.from(clientPublic, 'base64');
@@ -96,18 +66,14 @@ app.post((req, res) => {
     const ciphertext = Buffer.concat([cipher.update(slice), cipher.final()]);
     const tag = cipher.getAuthTag();
 
-    res.json({
+    return res.json({
       ciphertext: ciphertext.toString('base64'),
       iv: iv.toString('base64'),
       tag: tag.toString('base64'),
       chunkIndex: idx,
       totalChunks: TOTAL_CHUNKS
     });
-
-  } catch (e) {
-    res.status(500).json({ error: String(e) });
   }
-});
 
-// === EXPORT FOR VERCEL SERVERLESS ===
-module.exports = (req, res) => app(req, res);
+  return res.status(404).json({ error: 'Unknown route' });
+}

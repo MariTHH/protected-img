@@ -1,7 +1,11 @@
 {
   "name": "protected-img",
   "version": "1.0.0",
+  "scripts": {
+    "dev": "vercel dev"
+  },
   "dependencies": {
     "express": "^4.21.0"
-  }
+  },
+  "type": "module"
 }
