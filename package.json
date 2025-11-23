@@ -1,8 +1,11 @@
 {
   "name": "protected-img",
   "version": "1.0.0",
+  "main": "server.js",
   "scripts": {
-    "dev": "vercel dev"
+    "start": "node server.js"
   },
-  "dependencies": {}
+  "dependencies": {
+    "express": "^4.21.0"
+  }
 }

@@ -1,75 +1,18 @@
-<!DOCTYPE html>
+<!doctype html>
 <html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Protected image (encrypted chunks)</title>
+<link rel="stylesheet" href="style.css">
+</head>
 <body>
+<div id="wrap">
 <canvas id="canvas"></canvas>
-<div id="status"></div>
-<script>
-(async function () {
-  const status = document.getElementById('status');
-  const canvas = document.getElementById('canvas');
-  const ctx = canvas.getContext('2d');
-  function setStatus(t) { status.textContent = t }
+<div id="status">Loading...</div>
+</div>
 
-  setStatus('Initializing session...');
-  const sessRes = await fetch('/api/session-init').then(r=>r.json());
-  const serverPubB64 = sessRes.serverPublic;
-  const totalChunks = sessRes.totalChunks;
-  const sessionId = sessRes.sessionId;
 
-  const clientKey = await crypto.subtle.generateKey(
-    { name: 'ECDH', namedCurve: 'P-256' },
-    true, ['deriveBits']
-  );
-  const clientPubRaw = await crypto.subtle.exportKey('raw', clientKey.publicKey);
-  const clientPubB64 = btoa(String.fromCharCode(...new Uint8Array(clientPubRaw)));
-  const serverPubRaw = Uint8Array.from(atob(serverPubB64), c=>c.charCodeAt(0)).buffer;
-  const serverPublicKey = await crypto.subtle.importKey('raw', serverPubRaw, {name:'ECDH',namedCurve:'P-256'}, true, []);
-
-  async function deriveAesKey() {
-    const sharedBits = await crypto.subtle.deriveBits({name:'ECDH', public: serverPublicKey}, clientKey.privateKey, 256);
-    const salt = new Uint8Array(16);
-    const info = new TextEncoder().encode('protected-image');
-    const baseKey = await crypto.subtle.importKey('raw', sharedBits, { name: 'HKDF' }, false, ['deriveKey']);
-    return await crypto.subtle.deriveKey({ name: 'HKDF', hash:'SHA-256', salt, info}, baseKey, {name:'AES-GCM', length:256}, false, ['decrypt']);
-  }
-
-  const aesKey = await deriveAesKey();
-  const chunks = [];
-
-  for(let i=0;i<totalChunks;i++){
-    setStatus(`Downloading chunk ${i+1}/${totalChunks}...`);
-    const resp = await fetch('/api/get-chunk', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({ clientPublic: clientPubB64, chunkIndex:i, sessionId })
-    }).then(r=>r.json());
-
-    const ct = Uint8Array.from(atob(resp.ciphertext),c=>c.charCodeAt(0));
-    const iv = Uint8Array.from(atob(resp.iv),c=>c.charCodeAt(0));
-    const tag = Uint8Array.from(atob(resp.tag),c=>c.charCodeAt(0));
-    const full = new Uint8Array(ct.length + tag.length);
-    full.set(ct,0); full.set(tag, ct.length);
-    const plain = await crypto.subtle.decrypt({name:'AES-GCM', iv, tagLength:128}, aesKey, full.buffer);
-    chunks.push(new Uint8Array(plain));
-  }
-
-  const totalBytes = chunks.reduce((s,c)=>s+c.length,0);
-  const out = new Uint8Array(totalBytes);
-  let ptr=0;
-  for(const c of chunks){ out.set(c, ptr); ptr+=c.length; }
-
-  const blob = new Blob([out], {type:'image/png'});
-  const url = URL.createObjectURL(blob);
-  const img = new Image();
-  img.onload = () => {
-    canvas.width = img.width;
-    canvas.height = img.height;
-    ctx.drawImage(img,0,0);
-    URL.revokeObjectURL(url);
-    setStatus('Loaded');
-  };
-  img.src = url;
-})();
-</script>
+<script src="main.js"></script>
 </body>
 </html>
