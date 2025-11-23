@@ -47,9 +47,9 @@
     full.set(ct, 0); full.set(tag, ct.length);
 
     const plain = await window.crypto.subtle.decrypt(
-      { name: 'AES-GCM', iv, tagLength: 128 },
-      aesKey,
-      full.buffer
+    { name: 'AES-GCM', iv, tag, tagLength: 128 },
+    aesKey,
+    ct.buffer
     );
     chunks.push(new Uint8Array(plain));
   }
