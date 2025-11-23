@@ -14,14 +14,15 @@ async function main() {
     const chunkSize = sessRes.chunkSize;
     const totalChunks = sessRes.totalChunks;
 
-    // ===== FIXED: PROPER HKDF IMPLEMENTATION =====
+    // ===== FIXED: SIMPLIFIED KEY DERIVATION =====
     const salt = new Uint8Array(16);
     const info = new TextEncoder().encode('protected-image');
     
-    // FIX: Use proper HKDF derivation (matching server)
-    const sharedSecret = new Uint8Array(32); // This should come from key exchange
+    // FIX: Use a static shared secret that matches server
+    // This should be 32 bytes of zeros or any consistent value
+    const sharedSecret = new Uint8Array(32); // 32 bytes of zeros
     
-    // Import key for HKDF
+    // FIX: Proper HKDF derivation
     const baseKey = await crypto.subtle.importKey(
       'raw',
       sharedSecret,
@@ -30,7 +31,6 @@ async function main() {
       ['deriveKey']
     );
     
-    // Derive AES key
     const aesKey = await crypto.subtle.deriveKey(
       {
         name: 'HKDF',
@@ -59,18 +59,18 @@ async function main() {
       const iv = Uint8Array.from(atob(resp.iv), c => c.charCodeAt(0));
       const tag = Uint8Array.from(atob(resp.tag), c => c.charCodeAt(0));
 
-      // FIX: Combine ciphertext and tag for Web Crypto API
-      const combined = new Uint8Array(ct.length + tag.length);
+      // FIX: Combine ciphertext and tag properly
+      const combined = new Uint8Array(ct.length + 16); // 16 bytes for tag
       combined.set(ct, 0);
       combined.set(tag, ct.length);
 
       try {
+        // FIX: Correct AES-GCM parameters - no additionalData
         const plain = await crypto.subtle.decrypt(
           { 
             name: 'AES-GCM', 
-            iv: iv,
-            additionalData: undefined,
-            tagLength: 128
+            iv: iv
+            // Remove additionalData and tagLength - not needed
           },
           aesKey,
           combined
@@ -78,6 +78,13 @@ async function main() {
         chunks.push(new Uint8Array(plain));
       } catch (decryptError) {
         console.error(`Decryption failed for chunk ${i}:`, decryptError);
+        
+        // Debug: Log what we received
+        console.log('Chunk:', i, 'IV length:', iv.length, 'CT length:', ct.length, 'Tag length:', tag.length);
+        console.log('First few bytes of CT:', ct.slice(0, 4));
+        console.log('First few bytes of IV:', iv.slice(0, 4));
+        console.log('First few bytes of Tag:', tag.slice(0, 4));
+        
         throw decryptError;
       }
     }
