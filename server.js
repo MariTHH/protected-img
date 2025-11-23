@@ -1,10 +1,24 @@
+const express = require('express');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
-// ===== CONFIG =====
-const IMAGE_PATH = path.join(__dirname, '..', 'image.png');
-const CHUNK_SIZE = 32 * 1024;
+const app = express();
+
+// === CORS FIX ===
+app.use((req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST');
+  next();
+});
+
+app.use(express.json({ limit: '10mb' }));
+app.use(express.static(path.join(__dirname, 'public')));
+
+const PORT = process.env.PORT || 8080;
+const IMAGE_PATH = path.join(__dirname, 'image.png');
+const CHUNK_SIZE = 32 * 1024; // 32 KB per chunk
 
 if (!fs.existsSync(IMAGE_PATH)) {
   console.error('Put an image named image.png in project root');
@@ -14,7 +28,7 @@ if (!fs.existsSync(IMAGE_PATH)) {
 const IMAGE_BUFFER = fs.readFileSync(IMAGE_PATH);
 const TOTAL_CHUNKS = Math.ceil(IMAGE_BUFFER.length / CHUNK_SIZE);
 
-// ===== HKDF =====
+// === HKDF helper ===
 function hkdf(keyMaterial, salt, info, length = 32) {
   const prk = crypto.createHmac('sha256', salt).update(keyMaterial).digest();
   let prev = Buffer.alloc(0);
@@ -32,16 +46,17 @@ function hkdf(keyMaterial, salt, info, length = 32) {
   return Buffer.concat(output).slice(0, length);
 }
 
-// ===== ONE-TIME SERVER KEY =====
+// === ONE-TIME SERVER KEY & CHUNKS ===
 const serverECDH = crypto.createECDH('prime256v1');
 serverECDH.generateKeys();
 const serverPublicB64 = serverECDH.getPublicKey().toString('base64');
 
-// ===== PRE-CALCULATED CHUNKS =====
+// Для всех клиентов одинаковый static "shared secret"
+const sharedSecret = crypto.randomBytes(32);
 const salt = Buffer.alloc(16, 0);
-const sharedSecret = crypto.randomBytes(32); // static "shared secret" for all clients
-const aesKey = hkdf(sharedSecret, salt, Buffer.from('protected-image'));
+const aesKey = hkdf(sharedSecret, salt, Buffer.from('protected-image'), 32);
 
+// Предрассчитываем все чанки один раз
 const chunks = [];
 for (let i = 0; i < TOTAL_CHUNKS; i++) {
   const start = i * CHUNK_SIZE;
@@ -61,31 +76,24 @@ for (let i = 0; i < TOTAL_CHUNKS; i++) {
   });
 }
 
-// ===== VERCEL EXPORT =====
-module.exports = (req, res) => {
-  const url = req.url;
+// === ROUTES ===
+app.get('/session-init', (req, res) => {
+  res.json({
+    serverPublic: serverPublicB64,
+    chunkSize: CHUNK_SIZE,
+    totalChunks: TOTAL_CHUNKS
+  });
+});
 
-  if (url.startsWith('/session-init')) {
-    res.setHeader('Content-Type', 'application/json');
-    return res.end(JSON.stringify({
-      serverPublic: serverPublicB64,
-      chunkSize: CHUNK_SIZE,
-      totalChunks: TOTAL_CHUNKS
-    }));
+app.post('/get-chunk', (req, res) => {
+  try {
+    const { chunkIndex } = req.body;
+    const idx = Math.max(0, Math.min(TOTAL_CHUNKS - 1, Number(chunkIndex) || 0));
+    res.json({ ...chunks[idx], totalChunks: TOTAL_CHUNKS });
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
   }
+});
 
-  if (url.startsWith('/get-chunk') && req.method === 'POST') {
-    let body = '';
-    req.on('data', chunk => { body += chunk; });
-    req.on('end', () => {
-      const { chunkIndex } = JSON.parse(body);
-      const idx = Math.max(0, Math.min(TOTAL_CHUNKS - 1, Number(chunkIndex) || 0));
-      res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ ...chunks[idx], totalChunks: TOTAL_CHUNKS }));
-    });
-    return;
-  }
-
-  res.statusCode = 404;
-  res.end('Not Found');
-};
+// === START SERVER ===
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
