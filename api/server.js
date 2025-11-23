@@ -5,7 +5,7 @@ const path = require('path');
 
 const app = express();
 
-// CORS (если вдруг ты запустишь фронт не с Vercel)
+// CORS (если фронт не на Vercel)
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -16,7 +16,7 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: '10mb' }));
 
 // ===== CONFIG =====
-const IMAGE_PATH = path.join(__dirname, '..', 'image.png');
+const IMAGE_PATH = path.join(__dirname, '..', 'image.png'); // в корне проекта
 const CHUNK_SIZE = 32 * 1024;
 
 // ===== LOAD IMAGE =====
@@ -43,7 +43,6 @@ function hkdf(keyMaterial, salt, info, length = 32) {
 
 // ===== SESSION STORAGE =====
 const sessions = new Map();
-
 function createServerKeypair() {
   const ecdh = crypto.createECDH('prime256v1');
   ecdh.generateKeys();
@@ -51,7 +50,7 @@ function createServerKeypair() {
 }
 
 // ===== ROUTES =====
-app.get('/api/server', (req, res) => {
+app.get((req, res) => {
   if (req.query.route !== 'session-init') {
     return res.status(400).json({ error: 'Unknown route' });
   }
@@ -68,7 +67,7 @@ app.get('/api/server', (req, res) => {
   });
 });
 
-app.post('/api/server', (req, res) => {
+app.post((req, res) => {
   if (req.query.route !== 'get-chunk') {
     return res.status(400).json({ error: 'Unknown route' });
   }
@@ -110,5 +109,5 @@ app.post('/api/server', (req, res) => {
   }
 });
 
-// === EXPORT FOR VERCEL ===
-module.exports = app;
+// === EXPORT FOR VERCEL SERVERLESS ===
+module.exports = (req, res) => app(req, res);
