@@ -75,8 +75,8 @@ async function main() {
       ptr += c.length; 
     }
 
-    // Verify we have valid PNG data
-    console.log('First 8 bytes of decrypted data:', Array.from(out.slice(0, 8)).map(b => b.toString(16).padStart(2, '0')).join(' '));
+    // // Verify we have valid PNG data
+    // console.log('First 8 bytes of decrypted data:', Array.from(out.slice(0, 8)).map(b => b.toString(16).padStart(2, '0')).join(' '));
     
     const blob = new Blob([out], { type: 'image/png' });
     const url = URL.createObjectURL(blob);
