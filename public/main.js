@@ -39,8 +39,6 @@ async function main() {
       const iv = Uint8Array.from(atob(resp.iv), c => c.charCodeAt(0));
       const tag = Uint8Array.from(atob(resp.tag), c => c.charCodeAt(0));
 
-      console.log(`Chunk ${i}: IV=${iv.length}, CT=${ct.length}, Tag=${tag.length}`);
-
       // Combine ciphertext + tag (tag is 16 bytes for AES-GCM)
       const encryptedData = new Uint8Array(ct.length + 16);
       encryptedData.set(ct, 0);
@@ -56,7 +54,6 @@ async function main() {
           encryptedData
         );
         chunks.push(new Uint8Array(plain));
-        console.log(`Chunk ${i} decrypted successfully: ${plain.byteLength} bytes`);
       } catch (decryptError) {
         console.error(`Decryption failed for chunk ${i}:`, decryptError);
         
