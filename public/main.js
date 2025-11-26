@@ -13,8 +13,7 @@ async function main() {
     const sessRes = await fetch('/session-init').then(r => r.json());
     const totalChunks = sessRes.totalChunks;
 
-    // SIMPLIFIED: Use the same static AES key as server
-    const STATIC_AES_KEY = new Uint8Array(32); // 32 zeros
+    const STATIC_AES_KEY = new Uint8Array(32); 
     
     const aesKey = await crypto.subtle.importKey(
       'raw',
@@ -39,7 +38,6 @@ async function main() {
       const iv = Uint8Array.from(atob(resp.iv), c => c.charCodeAt(0));
       const tag = Uint8Array.from(atob(resp.tag), c => c.charCodeAt(0));
 
-      // Combine ciphertext + tag (tag is 16 bytes for AES-GCM)
       const encryptedData = new Uint8Array(ct.length + 16);
       encryptedData.set(ct, 0);
       encryptedData.set(tag, ct.length);
@@ -57,7 +55,6 @@ async function main() {
       } catch (decryptError) {
         console.error(`Decryption failed for chunk ${i}:`, decryptError);
         
-        // Debug info
         console.log('IV (hex):', Array.from(iv).map(b => b.toString(16).padStart(2, '0')).join(''));
         console.log('Tag (hex):', Array.from(tag).map(b => b.toString(16).padStart(2, '0')).join(''));
         console.log('First 16 bytes CT (hex):', Array.from(ct.slice(0, 16)).map(b => b.toString(16).padStart(2, '0')).join(''));
@@ -75,9 +72,6 @@ async function main() {
       ptr += c.length; 
     }
 
-    // // Verify we have valid PNG data
-    // console.log('First 8 bytes of decrypted data:', Array.from(out.slice(0, 8)).map(b => b.toString(16).padStart(2, '0')).join(' '));
-    
     const blob = new Blob([out], { type: 'image/png' });
     const url = URL.createObjectURL(blob);
 
